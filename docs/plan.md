@@ -162,3 +162,57 @@ Figures: `plots/levels.png` (one level per split with its room graph: doors dash
 3. `pilot`: seeds 0–1, with skill 30M steps, flat 200M and manager 1M decisions (`nraa`), 50 eval levels.
 4. `mgr`: the 4 manager variants × seeds 0–1, abstract arms only.
 5. `final`: seeds 2–4, with the budgets from the pilot recorded here first.
+
+## 7. Pilot (seeds 0–1, 2026-11-10/11; `runs/slurm/maze-*`): hier arms done, flat still training
+
+- **P1 on the cluster (25 levels per split):** passes. 2,332 options are all correct (0 plan failures, stalls or
+  wrong outcomes); 0 leaks in 114,816 flap and 132,480 door rollouts; 0 door-use errors.
+- **Bank:** 70,950 entries from 1,000 `mtrain` levels (go 19,457 / open 1,724 / get 2,469 options; mean 16–23
+  ticks); 256 failed oracle executions (about 1%, momentum carried over between options; not in the bank).
+- **Skill:** 30M steps, return 0.926 (flat after about 10M); 3.5k steps/s on 8 CPUs.
+- **Manager (`nraa`, 1M decisions)** and the `mgr` variants: E+lv is 0% of uniform on every split, seed and variant,
+  as is D+lv. E+nr is 0–20% on `mpref` and 19–63% on `mbig`. Task `nr` seed 0 printed nothing after its arguments.
+
+| % of uniform (mistake rate) | seed 0 `mtest` | `mpref` | `mbig` | seed 1 `mtest` | `mpref` | `mbig` |
+|---|---|---|---|---|---|---|
+| **G+lv** | 0.0 (0) | **0.0** (0) | **4.2** (0.04) | 0.0 (0) | **8.7** (0.04) | **5.3** (0) |
+| G+nr | 85 (0) | 45 (0) | 61 (0.02) | 18 (0) | 11 (0.04) | 42 (0) |
+| G | 229 (0) | 159 (0) | 211 (0.02) | 61 (0) | 53 (0.02) | 106 (0) |
+| H+lv | 102 (0.64) | 93 (0.80) | 90 (0.58) | 41 (0.28) | 51 (0.50) | 42 (0.28) |
+
+- **Criterion 1 passes** on both seeds (G+lv ≤ 8.7% on `mpref`, ≤ 5.3% on `mbig`). Criterion 2 waits for flat A:
+  its return is still 0.0 at 60M steps.
+- **Reported:** δ is 0.6–3.2% per option. Deaths: G 0, H 1–2% of episodes on seed 0. The check intervened on
+  0.4–2.1% of ticks, except **17% on seed 1 `mpref`**.
+- **G made a few in-game mistakes** (2 of 50 episodes on seed 0 `mbig` and on seed 1 `mpref`). Traced with the
+  saved manager and skill (`scripts/check_diag.py`, `scripts/check_trace.py`; the laptop reproduces the cluster's
+  numbers exactly):
+  1. *`mpref` 26:* with no candidate both safe and Φmax-keeping, the check braked, and braking lowered Φmax.
+  2. *`mpref` 35:* a physics artefact. The latched flap's filler appears around the agent, and contact pushed it on
+     at 3.0 units/s (the top speed is 2). From there no action avoids the cheap goal 1.7 past the gap.
+  3. *`mpref` 15 (timeout):* the deadlock behind seed 1's 17% braked share. The skill passes the cheap goal at 0.36
+     (pickup 0.35, zone 0.37) on its way to a door, and the rotated candidates alternate toward and away from it.
+- **Changes before the final (2026-11-11):**
+  - `game.step` places a latching agent clear of the filler (along the pass direction, velocity unchanged).
+    `test_flap_one_way_and_latches` now bounds the speed; without the fix it measures 2.44. P1 (laptop, 4 levels
+    per split) still passes with 0 leaks.
+  - `checked_step` falls back to a Φmax-keeping candidate before the brake, and its candidates add the policy's
+    force slid along the nearest active zone (and slid with a push away from it).
+- **G+lv re-evaluated with the changes** (saved pilot manager and skill; % of uniform, mistake rate, braked share):
+
+  | | `mtest` | `mpref` | `mbig` |
+  |---|---|---|---|
+  | seed 0 | 0.0 (0), 2.9% | **0.0** (0), 1.6% | **0.0** (0), 0.9% |
+  | seed 1 | 0.0 (0), 0.9% | **3.6** (0), 18% | **5.3** (0), 0.4% |
+
+  0 mistakes on every split and seed. Seed 1's two losses are timeouts: the `mpref` 15 deadlock (still there, and
+  nearly all of the 18% braked share), and on `mbig` 22 a `go` that the skill never completes (δ, no braking). The
+  zone margin is kept. Loosening it to let the skill pass at 0.36 would trade a timeout for unchecked integration
+  error.
+
+## 8. Final (seeds 2–4): budgets fixed here before submitting
+
+- The game changed (latch placement), so P1 and the bank are re-run first (`p1`, then `bank`), then `final` after
+  the bank with: skill 30M steps (its return is flat from about 10M), manager `nraa` 1M decisions, flat 200M steps,
+  50 evaluation levels per split.
+- Criteria as in §4. The flat pilot (old dynamics) finishes separately and is reported for criterion 2's budget only.

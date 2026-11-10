@@ -5,12 +5,14 @@
 #   bash scripts/cluster/submit.sh bank    # skill bank: 1000 mtrain levels in 20 shards -> runs/bank/bank_<k>.pkl
 #   bash scripts/cluster/submit.sh pilot   # pref.py, seeds 0-1 (needs runs/bank): SKILL_STEPS, FLAT_STEPS, MGR_STEPS
 #   bash scripts/cluster/submit.sh mgr     # manager variants base nr aa nraa x seeds 0-1, abstract arms only
+#   DEPEND=<pilot job> bash scripts/cluster/submit.sh rehier   # optional: re-evaluate the pilot's abstract + hier
+#                                          # arms with the saved manager and skill (plan.md §7), flat kept
 #   bash scripts/cluster/submit.sh final   # pref.py, fresh seeds 2-4, budgets from docs/plan.md (env vars)
 #   DEPEND=<jobid> bash scripts/cluster/submit.sh pilot   # start after that job (e.g. the bank) succeeds
 #   DRY_RUN=1 bash scripts/cluster/submit.sh pilot
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-exp=${1:?usage: submit.sh <p1|bank|pilot|mgr|final>}
+exp=${1:?usage: submit.sh <p1|bank|pilot|mgr|rehier|final>}
 mkdir -p runs/slurm
 CPUS=4
 PREF=(--bank runs/bank --skill-steps "${SKILL_STEPS:-30000000}" --flat-steps "${FLAT_STEPS:-200000000}"
@@ -24,6 +26,8 @@ case "$exp" in
            ARGS=(--out "${OUT:-runs/pilot}" "${PREF[@]}") ;;
     mgr)   N=8; SCRIPT=scripts/pref.py; MEM=${MEM:-8G}
            ARGS=(--out "${OUT:-runs/mgr}" "${PREF[@]}" --arms abstract --variants base nr aa nraa) ;;
+    rehier) N=2; SCRIPT=scripts/pref.py; MEM=${MEM:-32G}; CPUS=8
+           ARGS=(--out "${OUT:-runs/pilot}" "${PREF[@]}" --arms abstract hier --resume) ;;
     final) N=3; SCRIPT=scripts/pref.py; MEM=${MEM:-32G}; CPUS=8
            ARGS=(--out "${OUT:-runs/final}" "${PREF[@]}" --seed-offset 2) ;;
     *) echo "unknown preset $exp" >&2; exit 1 ;;

@@ -118,6 +118,12 @@ def step(lv: Level, st: State, a) -> State:
     room = room_of(lv, pos)
     cross = lv.flap_ok & ~bits(st.flaps, sim.NF) & (lv.flap_from == st.room) & (lv.flap_to == room) & (room != st.room)
     flaps = st.flaps | jnp.sum(cross.astype(jnp.int32) << jnp.arange(sim.NF))
+    # The latched filler closes the gap around an agent whose centre is just past the centreline. Contact then
+    # pushed it on at up to 3 units/s (pilot, mpref 35: above the top speed of 2, into an item). Instead the agent
+    # is placed clear of the filler along the flap's pass direction, with its velocity unchanged.
+    need = jnp.maximum(0.0, sim.T + sim.RAD + 0.01 - jnp.sum((pos - lv.flap_xy) * lv.flap_n, axis=1))
+    pos = pos + jnp.sum(jnp.where(cross[:, None], lv.flap_n * need[:, None], 0.0), axis=0)
+    qpos = qpos.at[:2].set(pos)
     in_pit = ((pos[0] > lv.pit[:, 0]) & (pos[0] < lv.pit[:, 2]) & (pos[1] > lv.pit[:, 1]) & (pos[1] < lv.pit[:, 3]))
     alive = st.alive & ~(live & in_pit.any())
     present = ~bits(st.gone, NI) & (lv.item_kind >= 0)

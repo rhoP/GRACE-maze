@@ -50,7 +50,13 @@ def test_flap_one_way_and_latches():
     c = sim.gap_centre(lk.edge)
     n = sim.normal(lk.edge, spec.frame_room(lk.to) == sim.EDGES[lk.edge][1])
     st = _place(lv, G.initial(lv), c - n, lk.frm)
-    st = _drive(lv, st, n, 30)
+    step = jax.jit(G.step)
+    u = jnp.array([n[0], n[1], 0.0], jnp.float32)
+    top = 0.0
+    for _ in range(30):  # latching must not push the agent (the pilot saw 3.0 from the filler's contact)
+        st = step(lv, st, u)
+        top = max(top, float(jnp.abs(st.qvel[:2]).max()))
+    assert top <= sim.GEAR / sim.DAMP + 1e-3, top
     assert int(st.room) == lk.to and (int(st.flaps) >> lk.flap) & 1
     back = _drive(lv, st, -n, 60)
     assert int(back.room) == lk.to

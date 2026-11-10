@@ -94,16 +94,39 @@ def brake_action(st: G.State):
 ANGLES = (0.0, np.pi / 4, -np.pi / 4, np.pi / 2, -np.pi / 2)
 
 
-def candidates(st: G.State, a):
-    """The policy's action, the same force rotated by ±45° and ±90° (``use`` kept), then the brake."""
+def away(st: G.State, z):
+    """Unit vector from the nearest active zone (rectangle or item disc) to the agent; zero if none is active."""
+    (rect, r_act), (cen, c_act) = z
+    p = st.qpos[:2]
+    q = jnp.clip(p, rect[:, :2], rect[:, 2:])
+    dr = jnp.where(r_act, jnp.linalg.norm(p - q, axis=1), 1e9)
+    dc = jnp.where(c_act, jnp.linalg.norm(p - cen, axis=1) - (G.PICK + ITEM_MARGIN), 1e9)
+    i, j = jnp.argmin(dr), jnp.argmin(dc)
+    v = jnp.where(dr[i] < dc[j], p - q[i], p - cen[j])
+    n = jnp.linalg.norm(v)
+    return jnp.where((jnp.minimum(dr[i], dc[j]) < 1e8) & (n > 1e-6), v / jnp.maximum(n, 1e-6), 0.0)
+
+
+def candidates(st: G.State, a, z=None):
+    """The policy's action; with zones ``z``, the same force slid along the nearest zone (its component toward the
+    zone removed) and slid with a push away from it; the force rotated by ±45° and ±90° (``use`` kept); the brake.
+
+    The slide was added after the pilot: on mpref 15 the skill pressed past an item disc beside a door and the
+    rotations alternated toward and away from the disc for 1,500 ticks."""
+    f0 = jnp.clip(a[:2], -1.0, 1.0)
     c, s_ = jnp.cos(jnp.asarray(ANGLES)), jnp.sin(jnp.asarray(ANGLES))
-    f = jnp.stack([c * a[0] - s_ * a[1], s_ * a[0] + c * a[1]], 1)
-    rot = jnp.concatenate([f, jnp.full((len(ANGLES), 1), a[2])], 1)
+    f = jnp.stack([c * f0[0] - s_ * f0[1], s_ * f0[0] + c * f0[1]], 1)
+    if z is not None:
+        n = away(st, z)
+        sl = f0 - jnp.minimum(0.0, f0 @ n) * n
+        f = jnp.concatenate([f[:1], sl[None], jnp.clip(sl + 0.5 * n, -1.0, 1.0)[None], f[1:]], 0)
+    rot = jnp.concatenate([f, jnp.full((f.shape[0], 1), a[2])], 1)
     return jnp.concatenate([rot, brake_action(st)[None]], 0)
 
 
 def checked_step(lv: G.Level, table, p, st: G.State, a):
-    """(next state, intervened): the first allowed candidate (``candidates``), else the brake.
+    """(next state, intervened): the first allowed candidate (``candidates``), else the first Φmax-keeping one,
+    else the brake.
 
     A candidate is allowed when its successor is alive, keeps Φmax, and is safe. If ``st`` itself already fails the
     (conservative) safety test, the safety part is waived and only the exact tests remain: braking cannot leave such
@@ -112,11 +135,13 @@ def checked_step(lv: G.Level, table, p, st: G.State, a):
     v0 = phi_j(table, p, st)
     z = zones(lv, table, p, st)
     waive = ~safe(st, z)
-    cand = candidates(st, a)
+    cand = candidates(st, a, z)
     nxt = jax.vmap(lambda u: G.step(lv, st, u))(cand)
-    ok = jax.vmap(lambda s1: s1.alive & (phi_j(table, p, s1) >= v0 - 1e-6) & (safe(s1, z) | waive))(nxt)
-    ok = ok.at[-1].set(True)
-    k = jnp.argmax(ok)
+    keep = jax.vmap(lambda s1: s1.alive & (phi_j(table, p, s1) >= v0 - 1e-6))(nxt)
+    ok = keep & jax.vmap(lambda s1: safe(s1, z) | waive)(nxt)
+    # tiers: safe and Φmax-keeping; else Φmax-keeping (the pilot: braking regardless lowered Φmax on 2 of 50
+    # episodes on mpref / mbig); else the brake
+    k = jnp.where(ok.any(), jnp.argmax(ok), jnp.where(keep.any(), jnp.argmax(keep), cand.shape[0] - 1))
     return jax.tree_util.tree_map(lambda x: x[k], nxt), k > 0
 
 
