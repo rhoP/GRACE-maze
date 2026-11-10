@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "GRACE-maze"
+version = "0.1.0"
+description = "A MuJoCo (MJX) point-mass maze with one-way flaps, key doors and pits, for testing GRACE's hierarchy under continuous control"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.26", "jax>=0.4.30", "flax>=0.8", "optax>=0.2", "mujoco>=3.2", "mujoco-mjx>=3.2",
+                "matplotlib>=3.7", "imageio>=2.31"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["maze*"]
