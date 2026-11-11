@@ -216,3 +216,66 @@ Figures: `plots/levels.png` (one level per split with its room graph: doors dash
   the bank with: skill 30M steps (its return is flat from about 10M), manager `nraa` 1M decisions, flat 200M steps,
   50 evaluation levels per split.
 - Criteria as in §4. The flat pilot (old dynamics) finishes separately and is reported for criterion 2's budget only.
+
+**Pilot flat A (seed 0, old dynamics, 200M steps):** the training return stayed 0.0 throughout; at test it reaches no
+goal (timeouts on every episode), so A is 295 / 170 / 251% of uniform on `mtest` / `mpref` / `mbig`.
+
+## 9. Final (seeds 2–4, budgets as in §8; `runs/final`, job 25056733, 2026-11-11): hier arms done, flat training
+
+- **P1 on the cluster (new dynamics, 25 levels per split):** passes. 2,332 options are all correct; 0 leaks in 114,816
+  flap and 132,480 door rollouts; 0 door-use errors.
+- **Bank:** 71,634 entries (go 19,626 / open 1,755 / get 2,497).
+- The abstract arms are identical to the pilot's (same evaluation levels): C, D+lv and E+lv are 0% everywhere.
+
+| % of uniform (mistake rate), braked share | `mtest` | `mpref` | `mbig` |
+|---|---|---|---|
+| **G+lv** seed 2 | 6.1 (0), 21% | **6.1 (0.02)**, 1.1% | **0.0** (0), 1.2% |
+| **G+lv** seed 3 | 0.0 (0), 7.0% | **0.0** (0), 1.2% | **0.0** (0), 1.3% |
+| **G+lv** seed 4 | 0.0 (0), 3.2% | **5.8** (0), 1.1% | **15.8** (0), 1.4% |
+| G+nr (seeds 2 / 3 / 4) | 30 / 10 / 12 | 18 / 4 / 24 | 51 / 32 / 53 |
+| G | 121 / 58 / 67 | 121 / 72 / 97 | 146 / 104 / 168 |
+| H+lv | 55 / 50 / 39 | 73 / 53 / 75 | 46 / 45 / 74 |
+
+- **Criterion 1:** `mpref` passes on every seed (≤ 6.1%). `mbig` passes on seeds 2 and 3 (0%) but **misses on seed 4
+  (15.8%: 3 of 50 timeouts)**; the mean over seeds is 5.3%.
+- **One in-game mistake under the check** (seed 2 `mpref`, 1 of 50 episodes), and seed 2 `mtest` braked on 21% of
+  ticks (a deadlock, as in the pilot's `mpref` 15). Both to be traced with the saved models.
+- Deaths: G+lv 0; H+lv 1 option death on `mbig` for seeds 2 and 3.
+- Flat A at about 80M of 200M steps: training return 0.0 (seeds 2, 4) and 0.09 (seed 3).
+- **Traced with the saved models** (`scripts/check_diag.py`, `scripts/check_trace.py`; the laptop reproduces the
+  cluster's G+lv results):
+  1. *The mistake (seed 2, `mpref` 23) is a physics bug.* After the agent latches a flap, the blade (a free hinged
+     box, still open at about 57°) springs shut through the to room and sweeps the agent along. 3 ticks after the
+     latch it pushed the agent 0.013 per tick toward the cheap goal, 0.85 past the wall. The braking model leaves
+     this push out, so a safe state had no safe successor, and even full braking (speed 0.05) was swept into the goal.
+     Two weaknesses in the check showed up on the way: the pilot's fallback took the policy's force before the brake,
+     and once a state failed the safety test the test was waived, so the policy could push on.
+  2. *The seed 2 `mtest` braking (21%)* is one deadlock (level 32, an `open` option that braked on about 80% of its
+     ticks). It is gone after the changes below.
+  3. *The seed 4 timeouts are the skill (δ).* On `mbig` 7 the agent circles beside the spawn room's flap gap for
+     300 ticks per attempt and never pushes through; the check does not intervene. Seeds 2 and 3 solve the same
+     levels.
+- **Changes (2026-11-11), made after seeing the final's hierarchy results:**
+  - `game.step` holds a latched flap's blade shut (its angle and velocity set to 0; it lies inside the filler).
+    `test_flap_one_way_and_latches` asserts this.
+  - `hier.slack`: the safety test as a signed clearance (`safe` is slack ≥ 0, unchanged). `checked_step` no longer
+    waives safety in an unsafe state; it requires the successor to be no less safe. Its fallback order is now
+    safe and Φmax-keeping, then the brake if it keeps Φmax, then any Φmax-keeping candidate, then the brake.
+- **G+lv re-scored with the changes** (the final's saved models, laptop; % of uniform, braked share):
+
+  | | `mtest` | `mpref` | `mbig` |
+  |---|---|---|---|
+  | seed 2 | 0.0, 1.2% | **0.0**, 1.3% | **0.0**, 1.2% |
+  | seed 3 | 0.0, 7.7% | **0.0**, 1.2% | **0.0**, 1.3% |
+  | seed 4 | 0.0, 3.4% | **7.9**, 0.9% | **15.8**, 1.3% |
+
+  0 mistakes on every split and seed. Seed 4's losses are all skill timeouts (3 of 50 on `mpref` and on `mbig`).
+- **Status:** this table is diagnostic only. Both changes were chosen after looking at seeds 2–4, so they are tested
+  on fresh seeds in §10.
+
+## 10. Second final (seeds 5–7, `runs/final2`): the changed game and check, budgets as in §8
+
+- The game changed again (the blade), so P1 and the bank are re-run first, then `OUT=runs/final2 SEED_OFFSET=5
+  bash scripts/cluster/submit.sh final`. Budgets, arms and criteria are unchanged (§4, §8).
+- Criterion 1 is judged per seed, as for the pilot. The weak skill seed (seed 4) is a known risk; nothing in the skill
+  changed.

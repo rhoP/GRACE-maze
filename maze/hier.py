@@ -73,18 +73,24 @@ def zones(lv: G.Level, table, p, st: G.State):
 ITEM_MARGIN = 0.02
 
 
-def safe(st: G.State, z):
-    """The box from ``st``'s position to its full braking stop meets no active zone: rectangles (pits, flap
-    crossings; with MARGIN) and item discs (radius PICK + ITEM_MARGIN, the pickup's own trigger). A tick moves at
-    most 0.2, so the swept segment between ticks is covered by the previous tick's stop box."""
+def slack(st: G.State, z):
+    """Signed clearance of the box from ``st``'s position to its full braking stop: the least, over active zones, of
+    the box's separation from a rectangle (pits, flap crossings) less MARGIN, and of its distance to an item disc's
+    centre less PICK + ITEM_MARGIN (the pickup's own trigger). Large when no zone is active."""
     (rect, r_act), (cen, c_act) = z
     p1 = st.qpos[:2]
     p2 = p1 + stop_dist(st.qvel[:2])
     lo, hi = jnp.minimum(p1, p2), jnp.maximum(p1, p2)
-    hit = (lo[0] - MARGIN < rect[:, 2]) & (hi[0] + MARGIN > rect[:, 0]) & (lo[1] - MARGIN < rect[:, 3]) & \
-        (hi[1] + MARGIN > rect[:, 1])
-    d = jnp.linalg.norm(jnp.clip(cen, lo, hi) - cen, axis=1)
-    return ~(hit & r_act).any() & ~((d < G.PICK + ITEM_MARGIN) & c_act).any()
+    sep = jnp.maximum(jnp.maximum(rect[:, 0] - hi[0], lo[0] - rect[:, 2]),
+                      jnp.maximum(rect[:, 1] - hi[1], lo[1] - rect[:, 3])) - MARGIN
+    d = jnp.linalg.norm(jnp.clip(cen, lo, hi) - cen, axis=1) - (G.PICK + ITEM_MARGIN)
+    return jnp.minimum(jnp.min(jnp.where(r_act, sep, 1e9)), jnp.min(jnp.where(c_act, d, 1e9)))
+
+
+def safe(st: G.State, z):
+    """The braking box meets no active zone (``slack`` ≥ 0). A tick moves at most 0.2, so the swept segment between
+    ticks is covered by the previous tick's stop box."""
+    return slack(st, z) >= 0.0
 
 
 def brake_action(st: G.State):
@@ -125,23 +131,27 @@ def candidates(st: G.State, a, z=None):
 
 
 def checked_step(lv: G.Level, table, p, st: G.State, a):
-    """(next state, intervened): the first allowed candidate (``candidates``), else the first Φmax-keeping one,
-    else the brake.
+    """(next state, intervened): the first allowed candidate (``candidates``), else the brake if it keeps Φmax, else
+    the first Φmax-keeping candidate, else the brake.
 
     A candidate is allowed when its successor is alive, keeps Φmax, and is safe. If ``st`` itself already fails the
-    (conservative) safety test, the safety part is waived and only the exact tests remain: braking cannot leave such
-    a state (the smoke run: braking on 58% of ticks on mpref). Rotated candidates let the agent slide round a zone
+    (conservative) safety test, the successor must instead be no less safe (``slack`` not lower): requiring safety
+    there braked on 58% of ticks in the smoke run, and waiving it (the pilot) let the policy push on into a cheap
+    goal (final seed 2, mpref 23). Rotated candidates let the agent slide round a zone
     that the policy pushes into, where pure braking left it pushing into the same zone every tick."""
     v0 = phi_j(table, p, st)
     z = zones(lv, table, p, st)
-    waive = ~safe(st, z)
+    floor = jnp.minimum(0.0, slack(st, z))
     cand = candidates(st, a, z)
     nxt = jax.vmap(lambda u: G.step(lv, st, u))(cand)
     keep = jax.vmap(lambda s1: s1.alive & (phi_j(table, p, s1) >= v0 - 1e-6))(nxt)
-    ok = keep & jax.vmap(lambda s1: safe(s1, z) | waive)(nxt)
-    # tiers: safe and Φmax-keeping; else Φmax-keeping (the pilot: braking regardless lowered Φmax on 2 of 50
-    # episodes on mpref / mbig); else the brake
-    k = jnp.where(ok.any(), jnp.argmax(ok), jnp.where(keep.any(), jnp.argmax(keep), cand.shape[0] - 1))
+    ok = keep & jax.vmap(lambda s1: slack(s1, z) >= floor - 1e-6)(nxt)
+    # tiers: safe and Φmax-keeping; else the brake if it keeps Φmax; else any Φmax-keeping candidate (the pilot:
+    # braking regardless lowered Φmax on 2 of 50 episodes on mpref / mbig); else the brake. The brake comes before
+    # the other keepers because a safe state fails the test only under a push the braking model leaves out (final
+    # seed 2, mpref 23: a just-latched flap's leaf springing shut; the policy's force then took the cheap goal).
+    brake = cand.shape[0] - 1
+    k = jnp.where(ok.any(), jnp.argmax(ok), jnp.where(keep[brake] | ~keep.any(), brake, jnp.argmax(keep)))
     return jax.tree_util.tree_map(lambda x: x[k], nxt), k > 0
 
 

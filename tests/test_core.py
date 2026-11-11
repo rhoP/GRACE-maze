@@ -58,6 +58,8 @@ def test_flap_one_way_and_latches():
         top = max(top, float(jnp.abs(st.qvel[:2]).max()))
     assert top <= sim.GEAR / sim.DAMP + 1e-3, top
     assert int(st.room) == lk.to and (int(st.flaps) >> lk.flap) & 1
+    # the latched blade stays shut (the final saw it spring shut through the to room and sweep the agent along)
+    assert float(jnp.abs(st.qpos[2:]).max()) == 0.0 and float(jnp.abs(st.qvel[2:]).max()) == 0.0
     back = _drive(lv, st, -n, 60)
     assert int(back.room) == lk.to
     st = _place(lv, G.initial(lv), c + n, lk.to)

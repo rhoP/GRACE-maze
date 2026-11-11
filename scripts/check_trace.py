@@ -1,5 +1,5 @@
 """Tick-by-tick trace of G+lv on one level (pilot models): per option the start/end abstract state, and per tick
-the candidate tests (alive, keeps Φmax, safe) when the check intervenes."""
+the candidate tests (alive, keeps Φmax, slack of the state and of each successor) when the check intervenes."""
 from __future__ import annotations
 
 import json
@@ -44,11 +44,11 @@ def tick(st, target, otype):
     a = net.apply(params, E.skill_obs(lv, st, target, otype))[0][0]
     v0 = Hh.phi_j(table, pj, st)
     z = Hh.zones(lv, table, pj, st)
-    waive = ~Hh.safe(st, z)
+    waive = Hh.slack(st, z)
     nxt = jax.vmap(lambda u: G.step(lv, st, u))(Hh.candidates(st, a, z))
     alive = nxt.alive
     keep = jax.vmap(lambda s1: Hh.phi_j(table, pj, s1) >= v0 - 1e-6)(nxt)
-    sf = jax.vmap(lambda s1: Hh.safe(s1, z))(nxt)
+    sf = jax.vmap(lambda s1: Hh.slack(s1, z))(nxt)
     st2, br = Hh.checked_step(lv, table, pj, st, a)
     (rect, r_act), (cen, c_act) = z
     return st2, br, a, alive, keep, sf, waive, v0, r_act, c_act
@@ -75,8 +75,8 @@ while s is not None and s[A.END] < 0 and t < 1500:
         if (bool(br) or ALL) and printed < maxprint:
             printed += 1
             print(f"  t={t} pos={np.round(np.asarray(st.qpos[:2]), 2)} vel={np.round(np.asarray(st.qvel[:2]), 2)} "
-                  f"a={np.round(np.asarray(a), 2)} waive={bool(waive)} alive={np.asarray(alive).astype(int)} "
-                  f"keep={np.asarray(keep).astype(int)} safe={np.asarray(sf).astype(int)} "
+                  f"a={np.round(np.asarray(a), 2)} slack={float(waive):.3f} flap={np.round(np.asarray(st.qpos[2:3]), 2)} alive={np.asarray(alive).astype(int)} "
+                  f"keep={np.asarray(keep).astype(int)} slack1={np.round(np.asarray(sf), 3)} "
                   f"zones r={np.flatnonzero(np.asarray(r_act))} items={np.flatnonzero(np.asarray(c_act))}")
         ok, fail = E.judge(st, jnp.asarray(s, jnp.int32), jnp.asarray(tgt, jnp.int32))
         if bool(ok) or bool(fail):

@@ -124,6 +124,11 @@ def step(lv: Level, st: State, a) -> State:
     need = jnp.maximum(0.0, sim.T + sim.RAD + 0.01 - jnp.sum((pos - lv.flap_xy) * lv.flap_n, axis=1))
     pos = pos + jnp.sum(jnp.where(cross[:, None], lv.flap_n * need[:, None], 0.0), axis=0)
     qpos = qpos.at[:2].set(pos)
+    # A latched flap's blade is held shut inside its filler. Left free, it sprang shut through the to room and swept
+    # the agent along (final seed 2, mpref 23: into the cheap goal against full braking).
+    shut = bits(flaps, sim.NF)
+    qpos = qpos.at[2:].set(jnp.where(shut, 0.0, qpos[2:]))
+    qvel = qvel.at[2:].set(jnp.where(shut, 0.0, qvel[2:]))
     in_pit = ((pos[0] > lv.pit[:, 0]) & (pos[0] < lv.pit[:, 2]) & (pos[1] > lv.pit[:, 1]) & (pos[1] < lv.pit[:, 3]))
     alive = st.alive & ~(live & in_pit.any())
     present = ~bits(st.gone, NI) & (lv.item_kind >= 0)

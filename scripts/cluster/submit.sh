@@ -8,6 +8,7 @@
 #   DEPEND=<pilot job> bash scripts/cluster/submit.sh rehier   # optional: re-evaluate the pilot's abstract + hier
 #                                          # arms with the saved manager and skill (plan.md §7), flat kept
 #   bash scripts/cluster/submit.sh final   # pref.py, fresh seeds 2-4, budgets from docs/plan.md (env vars)
+#   OUT=runs/final2 SEED_OFFSET=5 bash scripts/cluster/submit.sh final   # the second final, seeds 5-7 (plan.md §10)
 #   DEPEND=<jobid> bash scripts/cluster/submit.sh pilot   # start after that job (e.g. the bank) succeeds
 #   DRY_RUN=1 bash scripts/cluster/submit.sh pilot
 set -euo pipefail
@@ -29,7 +30,7 @@ case "$exp" in
     rehier) N=2; SCRIPT=scripts/pref.py; MEM=${MEM:-32G}; CPUS=8
            ARGS=(--out "${OUT:-runs/pilot}" "${PREF[@]}" --arms abstract hier --resume) ;;
     final) N=3; SCRIPT=scripts/pref.py; MEM=${MEM:-32G}; CPUS=8
-           ARGS=(--out "${OUT:-runs/final}" "${PREF[@]}" --seed-offset 2) ;;
+           ARGS=(--out "${OUT:-runs/final}" "${PREF[@]}" --seed-offset "${SEED_OFFSET:-2}") ;;
     *) echo "unknown preset $exp" >&2; exit 1 ;;
 esac
 cmd=(sbatch --parsable --chdir="$PWD" --array="0-$((N - 1))%${MAX_PARALLEL:-20}" -o "runs/slurm/maze-${exp}-%A_%a.out"
